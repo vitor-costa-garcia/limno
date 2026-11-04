@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use limno in your research, please cite it as below."
+type: software
+title: "limno: explainable AI for data streams and continual learning"
+abstract: >-
+  limno is a Python library to explain models that learn from data streams, one
+  instance at a time. It follows the conventions of River.
+authors:
+  - family-names: "da Costa Garcia"
+    given-names: "Vitor"
+    email: vitorcostagarcia2006@gmail.com
+    orcid: "https://orcid.org/0009-0009-0772-8356"
+version: 0.0.1
+license: BSD-3-Clause
+repository-code: "https://github.com/vitor-costa-garcia/limno"
+keywords:
+  - explainable AI
+  - data streams
+  - online learning
+  - incremental learning
+  - continual learning
+  - river

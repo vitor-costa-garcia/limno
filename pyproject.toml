@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "limno"
+version = "0.0.1"
+description = "Explainable AI for data streams and continual learning."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Vitor da Costa Garcia", email = "vitorcostagarcia2006@gmail.com" }]
+keywords = [
+    "explainable-ai",
+    "xai",
+    "data-streams",
+    "online-learning",
+    "incremental-learning",
+    "continual-learning",
+    "river",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+river = ["river>=0.21"]
+dev = ["pytest", "pytest-cov", "ruff", "mypy", "river>=0.21"]
+docs = ["sphinx", "furo", "myst-parser"]
+
+[project.urls]
+Homepage = "https://github.com/vitor-costa-garcia/limno"
+Issues = "https://github.com/vitor-costa-garcia/limno/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/limno"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/notebooks"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "src"]
+addopts = "--doctest-modules"
+
+[tool.mypy]
+ignore_missing_imports = true
