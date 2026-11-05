@@ -144,6 +144,56 @@ def test_features_can_appear_and_disappear():
     assert set(explainer.importances) == {"a", "new"}
 
 
+def test_feature_is_hidden_after_max_age():
+    explainer = lm.importance.PFI(Fixed(), AbsoluteError(), max_age=2, seed=0)
+    for _ in range(2):
+        explainer.learn_one({"a": 1.0, "old": 1.0}, 2.0)
+    explainer.learn_one({"a": 1.0}, 2.0)
+    assert set(explainer.importances) == {"a", "old"}
+    explainer.learn_one({"a": 1.0}, 2.0)
+    assert set(explainer.importances) == {"a"}
+
+
+def test_hidden_feature_comes_back_with_its_old_value():
+    explainer = lm.importance.PFI(
+        Fixed(),
+        AbsoluteError(),
+        imputer=lm.imputer.Marginal(lm.storage.GeometricReservoir(size=1, seed=0), seed=0),
+        tracker=lm.tracker.Mean(),
+        max_age=2,
+    )
+    explainer.learn_one({"a": 0.0}, 0.0)
+    explainer.learn_one({"a": 1.0}, 2.0)
+    assert explainer.importances["a"] == 2.0
+    for _ in range(2):
+        explainer.learn_one({"b": 1.0}, 0.0)
+    assert "a" not in explainer.importances
+
+    # The past instance has no `a`, so the prediction is 0 and this value is 1
+    explainer.learn_one({"a": 0.5}, 1.0)
+    assert explainer.importances["a"] == 1.5
+
+
+def test_default_max_age():
+    explainer = lm.importance.PFI(Fixed(), AbsoluteError(), seed=0)
+    for _ in range(2):
+        explainer.learn_one({"old": 1.0}, 0.0)
+    for _ in range(1999):
+        explainer.learn_one({"a": 1.0}, 2.0)
+    assert "old" in explainer.importances
+    explainer.learn_one({"a": 1.0}, 2.0)
+    assert "old" not in explainer.importances
+
+
+def test_no_max_age_never_hides_a_feature():
+    explainer = lm.importance.PFI(Fixed(), AbsoluteError(), max_age=None, seed=0)
+    for _ in range(2):
+        explainer.learn_one({"old": 1.0}, 0.0)
+    for _ in range(3000):
+        explainer.learn_one({"a": 1.0}, 2.0)
+    assert "old" in explainer.importances
+
+
 @pytest.mark.parametrize("value", [None, {}])
 def test_model_that_cannot_predict_yet_is_skipped(value):
     class Untrained:
@@ -186,6 +236,11 @@ def test_seed_with_own_imputer_is_rejected():
 def test_bad_n_samples():
     with pytest.raises(ValueError, match="n_samples must be at least 1, got 0"):
         lm.importance.PFI(Fixed(), AbsoluteError(), n_samples=0)
+
+
+def test_bad_max_age():
+    with pytest.raises(ValueError, match="max_age must be at least 1 or None, got 0"):
+        lm.importance.PFI(Fixed(), AbsoluteError(), max_age=0)
 
 
 def test_bad_metric():

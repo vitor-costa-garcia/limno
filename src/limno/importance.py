@@ -53,6 +53,12 @@ class PFI(ImportanceExplainer):
     seed
         Random seed of the default imputer. To use a seed with your own imputer, give it to the
         imputer and its storage.
+    max_age
+        Hide a feature from `importances` once it is missing from this many instances in a row, as
+        its value is out of date. It comes back with its old value if it appears again. Raise this
+        for features that are rare, and use `None` to never hide a feature. The default matches the
+        window of the default tracker. This is not part of iPFI, which assumes that the features
+        do not change.
 
     Examples
     --------
@@ -80,6 +86,7 @@ class PFI(ImportanceExplainer):
         tracker: Tracker | None = None,
         n_samples: int = 1,
         seed: int | None = None,
+        max_age: int | None = 2000,
     ) -> None:
         super().__init__(model)
         self._predict = _predictor(model, metric)
@@ -87,11 +94,14 @@ class PFI(ImportanceExplainer):
             raise ValueError(f"n_samples must be at least 1, got {n_samples}")
         if imputer is not None and seed is not None:
             raise ValueError("seed only applies to the default imputer, give it to your imputer")
+        if max_age is not None and max_age < 1:
+            raise ValueError(f"max_age must be at least 1 or None, got {max_age}")
 
         # A clone, as the loss of an instance must not be mixed with what the metric has seen
         self.metric = metric.clone()
         self.n_samples = n_samples
         self.seed = seed
+        self.max_age = max_age
         if imputer is None:
             rng = random.Random(seed)
             storage = GeometricReservoir(seed=rng.getrandbits(32))
@@ -100,6 +110,8 @@ class PFI(ImportanceExplainer):
         self.tracker = EWMean() if tracker is None else tracker
         self._trackers: dict[Feature, Tracker] = {}
         self._sign = -1.0 if metric.bigger_is_better else 1.0
+        self._n_seen = 0
+        self._last_seen: dict[Feature, int] = {}
 
     def _loss(self, y: typing.Any, y_pred: typing.Any) -> float:
         self.metric.update(y, y_pred)
@@ -108,6 +120,10 @@ class PFI(ImportanceExplainer):
         return self._sign * loss
 
     def learn_one(self, x: dict, y: typing.Any) -> None:
+        self._n_seen += 1
+        for feature in x:
+            self._last_seen[feature] = self._n_seen
+
         if self.imputer.ready:
             y_pred = self._predict(x)
             # A River classifier that has not learned yet predicts None or {}
@@ -125,4 +141,9 @@ class PFI(ImportanceExplainer):
 
     @property
     def importances(self) -> dict[Feature, float]:
-        return {feature: tracker.get() for feature, tracker in self._trackers.items()}
+        """The current importance of each feature, without those hidden by `max_age`."""
+        return {
+            feature: tracker.get()
+            for feature, tracker in self._trackers.items()
+            if self.max_age is None or self._n_seen - self._last_seen[feature] < self.max_age
+        }

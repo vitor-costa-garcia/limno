@@ -54,6 +54,19 @@ explainer = lm.importance.PFI(
 
 Statistics from `river.stats` can also be used as trackers.
 
+## Features that stop appearing
+
+A feature that is missing from an instance gets no update, so its value goes out of date.
+`importances` hides a feature once it is missing from `max_age` instances in a row, 2000 by default.
+It comes back with its old value if it appears again.
+
+```python
+explainer = lm.importance.PFI(model, metrics.LogLoss(), max_age=500)
+```
+
+Raise `max_age` for features that are rare, and use `None` to never hide a feature. This is not part
+of iPFI, which assumes that the features do not change.
+
 ## Write your own explainer
 
 A local explainer scores the features of one prediction. This one measures how much the prediction
