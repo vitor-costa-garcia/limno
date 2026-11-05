@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "limno"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Explainable AI for data streams and continual learning."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,9 @@ docs = ["sphinx", "furo", "myst-parser"]
 [project.urls]
 Homepage = "https://github.com/vitor-costa-garcia/limno"
 Issues = "https://github.com/vitor-costa-garcia/limno/issues"
+
+[tool.hatch.version]
+path = "src/limno/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/limno"]
