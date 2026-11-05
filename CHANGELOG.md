@@ -10,6 +10,8 @@
 
 * Add `lm.importance.PFI`, the incremental permutation feature importance (iPFI) of Fumagalli et al. (2023)
 
+* Add `max_age` to `lm.importance.PFI`, which hides features that have stopped appearing
+
 * Add `lm.storage` with `UniformReservoir` and `GeometricReservoir`
 
 * Add `lm.imputer` with `Marginal`

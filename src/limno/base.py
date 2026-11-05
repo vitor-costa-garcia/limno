@@ -270,4 +270,4 @@ class ImportanceExplainer(abc.ABC):
     @property
     @abc.abstractmethod
     def importances(self) -> dict[Feature, float]:
-        """The current importance of each feature seen so far."""
+        """The current importance of each feature."""

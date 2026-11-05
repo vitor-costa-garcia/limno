@@ -30,7 +30,8 @@ River, so an adapter can add them later.
   - Storages (`lm.storage`) keep past instances: `UniformReservoir` and `GeometricReservoir`.
   - Imputers (`lm.imputer`) replace feature values: `Marginal`.
   - Trackers (`lm.tracker`) keep running values: `Mean`, `EWMean`, or any of `river.stats`.
-- **Features can appear and disappear** along the stream, with no list of names to give upfront.
+- **Features can appear and disappear** along the stream, with no list of names to give upfront. A
+  feature that stops appearing is hidden after `max_age` instances.
 - **Reproducible runs** with a `seed`.
 - **A base class for your own explainers** (`lm.base.Explainer` and
   `lm.base.ImportanceExplainer`).
