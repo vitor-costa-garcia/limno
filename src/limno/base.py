@@ -141,6 +141,17 @@ def _check_model(model: typing.Any) -> None:
         raise TypeError(f"model must have a predict_one method, got {type(model).__name__}")
 
 
+def _check_river_metric(model: Model, metric: Metric) -> None:
+    """Check that River allows `metric` with `model`, if `model` is from River."""
+    try:
+        from river import base as river_base
+    except ImportError:
+        return
+    works_with = getattr(metric, "works_with", None)
+    if isinstance(model, river_base.Estimator) and works_with and not works_with(model):
+        raise ValueError(f"{type(metric).__name__} does not work with {type(model).__name__}")
+
+
 def _predictor(model: Model, metric: Metric) -> collections.abc.Callable[[dict], typing.Any]:
     """The method of `model` that gives what `metric` expects, following River's rule."""
     if not isinstance(metric, Metric):
@@ -148,14 +159,12 @@ def _predictor(model: Model, metric: Metric) -> collections.abc.Callable[[dict],
             "metric must have update, revert, get and clone methods and a bigger_is_better "
             f"attribute, got {type(metric).__name__}"
         )
-    try:
-        from river import base as river_base
-    except ImportError:
-        pass
+    # An adapter around a River model can have its own check, as River does not know the adapter
+    check_metric = getattr(model, "_check_metric", None)
+    if check_metric is not None:
+        check_metric(metric)
     else:
-        works_with = getattr(metric, "works_with", None)
-        if isinstance(model, river_base.Estimator) and works_with and not works_with(model):
-            raise ValueError(f"{type(metric).__name__} does not work with {type(model).__name__}")
+        _check_river_metric(model, metric)
 
     if getattr(metric, "requires_labels", True):
         return model.predict_one

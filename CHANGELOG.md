@@ -12,6 +12,8 @@
 
 * Add `max_age` to `lm.importance.PFI`, which hides features that have stopped appearing
 
+* Add `lm.multioutput` with `PerOutput`, which gives the importances of each output of a model
+
 * Add `lm.storage` with `UniformReservoir` and `GeometricReservoir`
 
 * Add `lm.imputer` with `Marginal`
