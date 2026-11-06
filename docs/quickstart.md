@@ -67,6 +67,36 @@ explainer = lm.importance.PFI(model, metrics.LogLoss(), max_age=500)
 Raise `max_age` for features that are rare, and use `None` to never hide a feature. This is not part
 of iPFI, which assumes that the features do not change.
 
+## Models with many outputs
+
+`lm.multioutput.PerOutput` gives the importances of each output:
+
+```python
+from river import linear_model, metrics, multioutput
+
+model = multioutput.RegressorChain(linear_model.LinearRegression(), order=["y1", "y2"])
+explainer = lm.multioutput.PerOutput(
+    model, lambda output: lm.importance.PFI(output, metrics.MAE(), seed=42)
+)
+
+for x, y in stream:  # `y` is a dictionary, such as {"y1": 1.5, "y2": 0.2}
+    explainer.learn_one(x, y)
+    model.learn_one(x, y)
+
+explainer.importances
+```
+
+```
+{'y1': {'a': 0.947, 'b': -0.0, 'c': -0.0}, 'y2': {'a': -0.0, 'b': 0.962, 'c': -0.0}}
+```
+
+There is one explainer per output, so this takes `n_outputs` times the predictions and state of a
+model with one output. In a chain, the importance of a feature for an output includes its effect
+through earlier outputs.
+
+For one value per feature over all the outputs, give `lm.importance.PFI` a metric from
+`river.metrics.multioutput`, such as `MicroAverage(metrics.MAE())`.
+
 ## Write your own explainer
 
 A local explainer scores the features of one prediction. This one measures how much the prediction

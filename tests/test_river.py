@@ -5,7 +5,7 @@ import pytest
 import limno as lm
 
 river = pytest.importorskip("river")
-from river import datasets, linear_model, metrics, preprocessing, stats, tree
+from river import datasets, linear_model, metrics, multioutput, preprocessing, stats, tree
 
 
 class DropFeature(lm.base.Explainer):
@@ -155,6 +155,129 @@ def test_river_stats_as_trackers():
 
     assert isinstance(stats.Mean(), lm.base.Tracker)
     assert importances(stats.Mean()) == pytest.approx(importances(lm.tracker.Mean()))
+
+
+def regressor_chain():
+    return multioutput.RegressorChain(linear_model.LinearRegression(), order=["y1", "y2"])
+
+
+def classifier_chain():
+    return multioutput.ClassifierChain(linear_model.LogisticRegression(), order=["y1", "y2"])
+
+
+def multi_output_stream(target, n=4000):
+    # `y1` only depends on `a`, `y2` only depends on `b`, and `c` is noise
+    rng = random.Random(0)
+    for _ in range(n):
+        x = {"a": rng.random(), "b": rng.random(), "c": rng.random()}
+        yield x, {"y1": target(x["a"]), "y2": target(x["b"])}
+
+
+def run_per_output(model, metric, stream):
+    explainer = lm.multioutput.PerOutput(
+        model, lambda output: lm.importance.PFI(output, metric, seed=42)
+    )
+    for x, y in stream:
+        explainer.learn_one(x, y)
+        model.learn_one(x, y)
+    return explainer.importances
+
+
+@pytest.mark.parametrize(
+    "model",
+    [regressor_chain(), preprocessing.StandardScaler() | regressor_chain()],
+    ids=["chain", "pipeline"],
+)
+def test_per_output_regression_finds_the_feature_of_each_output(model):
+    importances = run_per_output(model, metrics.MAE(), multi_output_stream(lambda v: 3 * v))
+
+    assert max(importances["y1"], key=importances["y1"].get) == "a"
+    assert max(importances["y2"], key=importances["y2"].get) == "b"
+    assert importances["y1"]["a"] > 0.5
+    assert importances["y2"]["b"] > 0.5
+    assert abs(importances["y1"]["c"]) < 0.05
+    assert abs(importances["y2"]["c"]) < 0.05
+
+
+@pytest.mark.parametrize(
+    "metric", [metrics.LogLoss(), metrics.Accuracy()], ids=lambda metric: type(metric).__name__
+)
+def test_per_output_classification_finds_the_feature_of_each_output(metric):
+    stream = multi_output_stream(lambda v: v > 0.5)
+    importances = run_per_output(classifier_chain(), metric, stream)
+
+    assert max(importances["y1"], key=importances["y1"].get) == "a"
+    assert max(importances["y2"], key=importances["y2"].get) == "b"
+
+
+def test_per_output_includes_the_effect_through_earlier_outputs():
+    # With no direct weight, `a` only reaches `y2` through the prediction of `y1`
+    model = regressor_chain()
+    x = {"a": 1.0}
+    for _ in range(100):
+        model.learn_one(x, {"y1": 3.0, "y2": 3.0})
+    model["y2"].weights["a"] = 0.0
+    model["y2"].weights["y1"] = 1.0
+    model["y2"].intercept = 0.0
+
+    explainer = lm.multioutput.PerOutput(
+        model, lambda output: lm.importance.PFI(output, metrics.MAE(), seed=42)
+    )
+    y_y1 = model.predict_one(x)["y1"]
+    explainer.learn_one({"a": 0.0}, {"y2": y_y1})
+    explainer.learn_one(x, {"y2": y_y1})
+    assert explainer.importances["y2"]["a"] > 0.5
+
+
+@pytest.mark.parametrize(
+    "model, metric, names",
+    [
+        (
+            regressor_chain(),
+            metrics.LogLoss(),
+            "LogLoss does not work with one output of Regressor",
+        ),
+        (classifier_chain(), metrics.MAE(), "MAE does not work with one output of ClassifierChain"),
+        (
+            regressor_chain(),
+            metrics.multioutput.MicroAverage(metrics.MAE()),
+            "MicroAverage does not work with one output of RegressorChain",
+        ),
+        (
+            preprocessing.StandardScaler() | classifier_chain(),
+            metrics.MAE(),
+            "MAE does not work with one output of Pipeline",
+        ),
+    ],
+    ids=["regressor-logloss", "classifier-mae", "micro-average", "pipeline"],
+)
+def test_per_output_rejects_metric_that_does_not_work_with_one_output(model, metric, names):
+    explainer = lm.multioutput.PerOutput(model, lambda output: lm.importance.PFI(output, metric))
+    with pytest.raises(ValueError, match=names):
+        explainer.learn_one({"a": 1.0}, {"y1": 1.0})
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        linear_model.LinearRegression(),
+        preprocessing.StandardScaler() | linear_model.LinearRegression(),
+    ],
+    ids=["model", "pipeline"],
+)
+def test_per_output_rejects_a_model_with_one_output(model):
+    with pytest.raises(TypeError, match="model must have many outputs"):
+        lm.multioutput.PerOutput(model, lambda output: lm.importance.PFI(output, metrics.MAE()))
+
+
+def test_pfi_with_a_multi_output_metric_gives_one_value_per_feature():
+    model = regressor_chain()
+    explainer = lm.importance.PFI(model, metrics.multioutput.MicroAverage(metrics.MAE()), seed=42)
+    importances = run(explainer, model, multi_output_stream(lambda v: 3 * v))
+
+    assert set(importances) == {"a", "b", "c"}
+    assert min(importances["a"], importances["b"]) > 0.25
+    assert abs(importances["c"]) < 0.05
 
 
 def test_pfi_follows_a_drift():

@@ -46,6 +46,19 @@ explainer = lm.importance.PFI(Fixed(), AbsoluteError(), seed=0)
 explainer.learn_one({"a": 0.0}, 0.0)
 explainer.learn_one({"a": 1.0}, 2.0)
 assert explainer.importances["a"] == 2.0
+
+
+class Outputs:
+    def predict_one(self, x):
+        return {"y": 2 * x["a"]}
+
+
+explainer = lm.multioutput.PerOutput(
+    Outputs(), lambda output: lm.importance.PFI(output, AbsoluteError(), seed=0)
+)
+explainer.learn_one({"a": 0.0}, {"y": 0.0})
+explainer.learn_one({"a": 1.0}, {"y": 2.0})
+assert explainer.importances["y"]["a"] == 2.0
 """
     subprocess.run([sys.executable, "-c", code], check=True)
 

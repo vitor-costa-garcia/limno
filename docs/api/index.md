@@ -4,6 +4,7 @@
 :maxdepth: 1
 
 importance
+multioutput
 storage
 imputer
 tracker
