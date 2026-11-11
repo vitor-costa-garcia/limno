@@ -363,3 +363,316 @@ def test_sparse_group_is_replaced_as_a_whole():
     explainer.learn_one({"blue": 1.0}, 0.0)
     explainer.learn_one({"red": 1.0}, 0.0)
     assert model.seen == ({"red": 1.0}, {"blue": 1.0})
+
+
+class SquaredError(AbsoluteError):
+    """A minimal River-style metric with a squared loss."""
+
+    def update(self, y_true, y_pred):
+        self.total += (y_true - y_pred) ** 2
+        self.n += 1
+
+    def revert(self, y_true, y_pred):
+        self.total -= (y_true - y_pred) ** 2
+        self.n -= 1
+
+    def clone(self):
+        return SquaredError()
+
+
+class Additive:
+    """A model that uses `a` and `b`, but not `c`."""
+
+    def predict_one(self, x):
+        return 3 * x.get("a", 0.0) + x.get("b", 0.0)
+
+
+def make_additive_stream(n, seed=0):
+    rng = random.Random(seed)
+    for _ in range(n):
+        x = {"a": rng.random(), "b": rng.random(), "c": rng.random()}
+        yield x, 3 * x["a"] + x["b"]
+
+
+def static_sage(metric=None, model=None, **kwargs):
+    return lm.importance.SAGE(
+        model or Additive(),
+        metric or SquaredError(),
+        imputer=lm.imputer.Marginal(lm.storage.UniformReservoir(size=500, seed=1), seed=2),
+        tracker=lm.tracker.Mean(),
+        **kwargs,
+    )
+
+
+def test_sage_matches_the_true_values():
+    # With a squared loss and independent features, the value is the variance from the feature:
+    # 9 / 12 for `a`, 1 / 12 for `b`, and 0 for `c`
+    explainer = static_sage(n_samples=50, seed=3)
+    for x, y in make_additive_stream(4000):
+        explainer.learn_one(x, y)
+    assert explainer.importances["a"] == pytest.approx(9 / 12, abs=0.03)
+    assert explainer.importances["b"] == pytest.approx(1 / 12, abs=0.03)
+    assert explainer.importances["c"] == pytest.approx(0.0, abs=0.03)
+
+
+@pytest.mark.parametrize(
+    "make_tracker", [lm.tracker.Mean, lambda: lm.tracker.EWMean(alpha=0.01)], ids=["mean", "ewmean"]
+)
+@pytest.mark.parametrize("metric", [AbsoluteError, SquaredError, Correct])
+def test_sage_values_add_up_to_the_drop_in_loss(make_tracker, metric):
+    explainer = lm.importance.SAGE(
+        Additive(), metric(), tracker=make_tracker(), n_samples=2, seed=0
+    )
+    mean, drop = make_tracker(), make_tracker()
+    sign = -1 if metric.bigger_is_better else 1
+
+    def loss(y, y_pred):
+        one = metric()
+        one.update(y, y_pred)
+        return sign * one.get()
+
+    for i, (x, y) in enumerate(make_additive_stream(1000)):
+        explainer.learn_one(x, y)
+        if i > 0:  # no past instance for the first one
+            y_pred = Additive().predict_one(x)
+            mean.update(y_pred)
+            drop.update(loss(y, mean.get()) - loss(y, y_pred))
+
+    assert sum(explainer.importances.values()) == pytest.approx(drop.get(), abs=1e-9)
+
+
+def test_sage_few_samples_keep_the_sum_but_move_values_below_zero():
+    def importances(n_samples):
+        explainer = static_sage(n_samples=n_samples, seed=3)
+        for x, y in make_additive_stream(4000):
+            explainer.learn_one(x, y)
+        return explainer.importances
+
+    few, many = importances(1), importances(50)
+    assert few["c"] < many["c"] - 0.1
+    assert few["c"] < -0.1
+    assert sum(few.values()) == pytest.approx(sum(many.values()), abs=0.01)
+
+
+def test_sage_number_of_predictions():
+    class Counting(Additive):
+        n = 0
+
+        def predict_one(self, x):
+            self.n += 1
+            return super().predict_one(x)
+
+    model = Counting()
+    explainer = lm.importance.SAGE(model, AbsoluteError(), n_samples=4, seed=0)
+    x = {"a": 1.0, "b": 1.0, "c": 1.0}
+    explainer.learn_one(x, 4.0)
+    assert model.n == 0  # no past instance yet
+    explainer.learn_one(x, 4.0)
+    assert model.n == 1 + (3 - 1) * 4
+
+
+def test_sage_default_number_of_samples():
+    assert lm.importance.SAGE(Additive(), AbsoluteError()).n_samples == 5
+
+
+class Recording(lm.imputer.Marginal):
+    """An imputer that keeps the features it was asked to replace."""
+
+    calls = ()
+
+    def impute_one(self, x, features):
+        self.calls = (*self.calls, tuple(features))
+        return super().impute_one(x, features)
+
+
+def test_sage_reveals_one_more_feature_at_each_step():
+    imputer = Recording(seed=0)
+    explainer = lm.importance.SAGE(
+        Additive(), AbsoluteError(), imputer=imputer, n_samples=2, seed=0
+    )
+    x = {"a": 1.0, "b": 1.0, "c": 1.0}
+    explainer.learn_one(x, 4.0)
+    explainer.learn_one(x, 4.0)
+
+    first, second, third, fourth = imputer.calls
+    assert first == second
+    assert third == fourth
+    assert len(first) == 2
+    assert len(third) == 1
+    assert set(third) < set(first)
+    assert set(explainer.importances) == {"a", "b", "c"}
+
+
+def test_sage_order_changes_between_instances():
+    imputer = Recording(seed=0)
+    explainer = lm.importance.SAGE(
+        Additive(), AbsoluteError(), imputer=imputer, n_samples=1, seed=0
+    )
+    for x, y in make_additive_stream(50):
+        explainer.learn_one(x, y)
+    assert len(set(imputer.calls)) > 3
+
+
+def test_sage_averages_predictions_before_the_loss():
+    # The samples give -1 and 1, whose mean is exact, while the mean of their losses is 1
+    class Script(lm.base.Imputer):
+        values = (-1.0, 1.0)
+        i = 0
+
+        def impute_one(self, x, features):
+            self.i += 1
+            return {**x, "v": self.values[self.i % 2]}
+
+    class Value:
+        def predict_one(self, x):
+            return x["v"]
+
+    explainer = lm.importance.SAGE(
+        Value(), AbsoluteError(), imputer=Script(), tracker=lm.tracker.Mean(), n_samples=2, seed=0
+    )
+    explainer.learn_one({"v": 0.0, "other": 0.0}, 0.0)
+    assert explainer.importances == {"v": 0.0, "other": 0.0}
+
+
+def test_average_of_probabilities_counts_a_missing_class_as_zero():
+    average = lm.importance._average([{True: 0.8}, {True: 0.2, False: 0.8}])
+    assert average == pytest.approx({True: 0.5, False: 0.4})
+
+
+def test_sage_mean_prediction_of_a_new_class_counts_earlier_instances_as_zero():
+    explainer = lm.importance.SAGE(Additive(), AbsoluteError(), tracker=lm.tracker.Mean())
+    assert explainer._mean_prediction({"a": 1.0}) == {"a": 1.0}
+    assert explainer._mean_prediction({"b": 1.0}) == pytest.approx({"a": 0.5, "b": 0.5})
+    assert explainer._mean_prediction({"a": 1.0}) == pytest.approx({"a": 2 / 3, "b": 1 / 3})
+
+
+def test_sage_no_importances_before_a_past_instance():
+    explainer = lm.importance.SAGE(Additive(), AbsoluteError(), seed=0)
+    assert explainer.importances == {}
+    explainer.learn_one({"a": 1.0}, 3.0)
+    assert explainer.importances == {}
+    explainer.learn_one({"a": 1.0}, 3.0)
+    assert set(explainer.importances) == {"a"}
+
+
+def test_sage_features_can_appear_and_disappear():
+    explainer = lm.importance.SAGE(Additive(), AbsoluteError(), seed=0)
+    explainer.learn_one({"a": 1.0}, 3.0)
+    explainer.learn_one({"a": 0.0, "new": 1.0}, 0.0)
+    assert set(explainer.importances) == {"a", "new"}
+    explainer.learn_one({"new": 1.0}, 0.0)
+    assert set(explainer.importances) == {"a", "new"}
+
+
+@pytest.mark.parametrize("value", [None, {}])
+def test_sage_model_that_cannot_predict_yet_is_skipped(value):
+    class Untrained:
+        def predict_one(self, x):
+            return value
+
+    explainer = lm.importance.SAGE(Untrained(), AbsoluteError(), seed=0)
+    for _ in range(3):
+        explainer.learn_one({"a": 1.0}, 2.0)
+    assert explainer.importances == {}
+    assert len(explainer.imputer.storage) == 3
+    assert explainer._means == {}
+
+
+@pytest.mark.parametrize("label", [True, "yes"])
+def test_sage_rejects_predictions_that_cannot_be_averaged(label):
+    class Labels:
+        def predict_one(self, x):
+            return label
+
+    explainer = lm.importance.SAGE(Labels(), AbsoluteError(), seed=0)
+    explainer.learn_one({"a": 1.0}, True)
+    with pytest.raises(TypeError, match="must be numbers or probabilities"):
+        explainer.learn_one({"a": 1.0}, True)
+
+
+def test_sage_seed_makes_it_reproducible():
+    def run(seed):
+        explainer = lm.importance.SAGE(Additive(), AbsoluteError(), seed=seed)
+        for x, y in make_additive_stream(300):
+            explainer.learn_one(x, y)
+        return explainer.importances
+
+    assert run(1) == run(1)
+    assert run(1) != run(2)
+
+
+def test_sage_seed_applies_to_the_order_with_own_imputer():
+    def run(seed):
+        explainer = static_sage(model=Additive(), seed=seed, n_samples=1)
+        for x, y in make_additive_stream(300):
+            explainer.learn_one(x, y)
+        return explainer.importances
+
+    assert run(1) == run(1)
+    assert run(1) != run(2)
+
+
+def test_sage_importances_follow_the_order_of_the_features():
+    explainer = lm.importance.SAGE(Additive(), AbsoluteError(), seed=3)
+    for x, y in make_additive_stream(5):
+        explainer.learn_one(x, y)
+    assert list(explainer.importances) == ["a", "b", "c"]
+
+
+def test_sage_group_of_one_feature_matches_the_feature():
+    plain = static_sage(n_samples=2, seed=3)
+    grouped = static_sage(n_samples=2, seed=3, groups={"only_a": ["a"]})
+    for x, y in make_additive_stream(500):
+        plain.learn_one(x, y)
+        grouped.learn_one(x, y)
+    values = plain.importances
+    assert grouped.importances == {"only_a": values["a"], "b": values["b"], "c": values["c"]}
+
+
+def test_sage_group_matches_the_true_value():
+    # With a squared loss, the group gets the variance of `3a + b`, which is 10 / 12
+    explainer = static_sage(n_samples=50, seed=3, groups={"ab": ["a", "b"]})
+    for x, y in make_additive_stream(4000):
+        explainer.learn_one(x, y)
+    assert explainer.importances["ab"] == pytest.approx(10 / 12, abs=0.03)
+    assert explainer.importances["c"] == pytest.approx(0.0, abs=0.03)
+
+
+def test_sage_group_number_of_predictions():
+    class Counting(Additive):
+        n = 0
+
+        def predict_one(self, x):
+            self.n += 1
+            return super().predict_one(x)
+
+    model = Counting()
+    explainer = lm.importance.SAGE(
+        model, AbsoluteError(), n_samples=4, groups={"ab": ["a", "b"]}, seed=0
+    )
+    x = {"a": 1.0, "b": 1.0, "c": 1.0}
+    explainer.learn_one(x, 4.0)
+    explainer.learn_one(x, 4.0)
+    assert model.n == 1 + (2 - 1) * 4
+
+
+def test_sage_sparse_group_is_hidden_as_a_whole():
+    # As with one-hot encoding, an instance only has the active column of the group
+    class Recording:
+        seen = ()
+
+        def predict_one(self, x):
+            self.seen = (*self.seen, dict(x))
+            return 0.0
+
+    model = Recording()
+    explainer = lm.importance.SAGE(
+        model, AbsoluteError(), n_samples=1, groups={"color": ["red", "blue"]}, seed=0
+    )
+    explainer.learn_one({"blue": 1.0, "c": 0.0}, 0.0)
+    for _ in range(10):
+        explainer.learn_one({"red": 1.0, "c": 1.0}, 0.0)
+    hidden = [x for x in model.seen if x["c"] == 1.0 and "blue" in x]
+    assert hidden
+    assert all("red" not in x for x in hidden)
+    assert set(explainer.importances) == {"color", "c"}
