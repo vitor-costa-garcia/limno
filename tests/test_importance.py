@@ -535,7 +535,7 @@ def test_sage_averages_predictions_before_the_loss():
 
 
 def test_average_of_probabilities_counts_a_missing_class_as_zero():
-    average = lm.importance._average([{True: 0.8}, {True: 0.2, False: 0.8}])
+    average = lm.importance.sage._average([{True: 0.8}, {True: 0.2, False: 0.8}])
     assert average == pytest.approx({True: 0.5, False: 0.4})
 
 
