@@ -135,6 +135,29 @@ class Imputer(abc.ABC):
         """
 
 
+def _check_groups(groups: dict) -> None:
+    """Check that every group has features, and that no feature is in two groups."""
+    seen = set()
+    for name, features in groups.items():
+        if not features:
+            raise ValueError(f"group {name!r} has no features")
+        for feature in features:
+            if feature in seen:
+                raise ValueError(f"feature {feature!r} is in more than one group")
+            seen.add(feature)
+
+
+def _group(x: dict, groups: dict) -> dict[Hashable, list[Feature]]:
+    """The features of `x` by group. A feature that is in no group is a group of its own."""
+    group_of = {feature: name for name, features in groups.items() for feature in features}
+    grouped: dict[Hashable, list[Feature]] = {}
+    for feature in x:
+        if feature not in group_of and feature in groups:
+            raise ValueError(f"{feature!r} is both a feature and the name of a group")
+        grouped.setdefault(group_of.get(feature, feature), []).append(feature)
+    return grouped
+
+
 def _check_model(model: typing.Any) -> None:
     """Check that `model` can predict."""
     if not isinstance(model, Model):

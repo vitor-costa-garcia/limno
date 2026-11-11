@@ -67,6 +67,22 @@ explainer = lm.importance.PFI(model, metrics.LogLoss(), max_age=500)
 Raise `max_age` for features that are rare, and use `None` to never hide a feature. This is not part
 of iPFI, which assumes that the features do not change.
 
+## Groups of features
+
+`groups` treats some features as one. A group is replaced as a whole, from one past instance, and
+gets one importance under its name:
+
+```python
+explainer = lm.importance.PFI(
+    model, metrics.LogLoss(), groups={"location": ["lat", "lon"], "time": ["hour", "weekday"]}
+)
+```
+
+Features in no group get their own importance. Use groups for features that only make sense
+together, such as the columns of a one-hot encoding. Also use them for correlated features: replacing
+one of them alone can underrate it, as the model can recover it from the others. Each instance then
+takes `1 + n_groups * n_samples` predictions.
+
 ## Models with many outputs
 
 `lm.multioutput.PerOutput` gives the importances of each output:

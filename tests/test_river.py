@@ -280,6 +280,34 @@ def test_pfi_with_a_multi_output_metric_gives_one_value_per_feature():
     assert abs(importances["c"]) < 0.05
 
 
+def test_pfi_groups_on_a_river_pipeline():
+    # In Friedman's stream, features 0 to 4 build the target, and 5 to 9 are noise
+    model = regressor_pipeline()
+    groups = {"used": [0, 1, 2, 3, 4], "noise": [5, 6, 7, 8, 9]}
+    explainer = lm.importance.PFI(model, metrics.MAE(), groups=groups, seed=42)
+    importances = run(explainer, model, datasets.synth.Friedman(seed=42).take(3000))
+
+    assert set(importances) == {"used", "noise"}
+    assert importances["used"] > 1
+    assert abs(importances["noise"]) < 0.1
+
+
+def test_per_output_with_groups():
+    model = regressor_chain()
+    explainer = lm.multioutput.PerOutput(
+        model,
+        lambda output: lm.importance.PFI(output, metrics.MAE(), groups={"ab": ["a", "b"]}, seed=42),
+    )
+    for x, y in multi_output_stream(lambda v: 3 * v):
+        explainer.learn_one(x, y)
+        model.learn_one(x, y)
+    importances = explainer.importances
+
+    assert set(importances["y1"]) == {"ab", "c"}
+    assert importances["y1"]["ab"] > 0.5
+    assert abs(importances["y2"]["c"]) < 0.05
+
+
 def test_pfi_follows_a_drift():
     # The target moves from depending on `a` to depending on `b`
     def stream():
