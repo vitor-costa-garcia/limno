@@ -10,9 +10,11 @@
 
 * Add `lm.importance.PFI`, the incremental permutation feature importance (iPFI) of Fumagalli et al. (2023)
 
+* Add `lm.importance.SAGE`, the interventional version of incremental SAGE (iSAGE) of Muschalik et al. (2023)
+
 * Add `max_age` to `lm.importance.PFI`, which hides features that have stopped appearing
 
-* Add `groups` to `lm.importance.PFI`, which treats some features as one
+* Add `groups` to `lm.importance.PFI` and `lm.importance.SAGE`, which treats some features as one
 
 * Add `lm.multioutput` with `PerOutput`, which gives the importances of each output of a model
 
@@ -25,3 +27,5 @@
 ### Documentation
 
 * Add a notebook on how `lm.importance.PFI` works
+
+* Add a notebook on how `lm.importance.SAGE` works

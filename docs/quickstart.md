@@ -82,6 +82,38 @@ Features in no group get their own importance. Use groups for features that only
 together, such as the columns of a one-hot encoding. Also use them for correlated features: a model can split
 its weight between them, so each one alone looks less important than they are together. Each instance then
 takes `1 + n_groups * n_samples` predictions.
+## Values that add up with SAGE
+
+`lm.importance.SAGE` is used in the same way:
+
+```python
+model = preprocessing.StandardScaler() | linear_model.LogisticRegression()
+explainer = lm.importance.SAGE(model, metrics.LogLoss(), seed=42)
+
+for x, y in datasets.Phishing():
+    explainer.learn_one(x, y)
+    model.learn_one(x, y)
+
+explainer.importances
+```
+
+```
+{'empty_server_form_handler': 0.17, 'https': 0.1, 'popup_window': 0.094, ...}
+```
+
+It shares out the drop in loss between predicting the mean and using the model, so the values add up
+to that drop as long as the features do not change. `PFI` values do not add up to anything.
+
+| | `PFI` | `SAGE` |
+|---|---|---|
+| Values add up to the drop in loss | No | Yes |
+| Predictions per instance | `1 + n_features * n_samples` | `1 + (n_features - 1) * n_samples` |
+| Default `n_samples` | 1 | 5 |
+| Metrics for labels, such as `Accuracy` | Yes | No, as predictions are averaged |
+
+With few samples, `SAGE` moves importance from unused features to used ones, so unused features
+fall below zero. The sum stays right, so it does not show this. Raise `n_samples` if the exact
+values matter.
 
 ## Models with many outputs
 

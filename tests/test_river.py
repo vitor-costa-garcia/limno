@@ -308,6 +308,148 @@ def test_per_output_with_groups():
     assert abs(importances["y2"]["c"]) < 0.05
 
 
+def test_sage_regression_finds_the_features_in_the_target():
+    # In Friedman's stream, features 5 to 9 are not used to build the target
+    model = regressor_pipeline()
+    explainer = lm.importance.SAGE(model, metrics.MAE(), seed=42)
+    importances = run(explainer, model, datasets.synth.Friedman(seed=42).take(3000))
+
+    assert set(importances) == set(range(10))
+    assert min(importances[f] for f in (0, 1, 3, 4)) > max(importances[f] for f in range(5, 10))
+
+
+def test_sage_classification_finds_what_the_model_uses():
+    # With classification function 0, the Agrawal class only depends on age
+    stream = datasets.synth.Agrawal(classification_function=0, seed=42).take(3000)
+    model = tree.HoeffdingTreeClassifier(grace_period=100)
+    explainer = lm.importance.SAGE(model, metrics.LogLoss(), n_samples=2, seed=42)
+    importances = run(explainer, model, stream)
+
+    assert max(importances, key=importances.get) == "age"
+    assert importances["age"] > 0
+
+
+def test_sage_probabilities_are_asked_of_the_model():
+    model = classifier_pipeline()
+    assert lm.importance.SAGE(model, metrics.LogLoss())._predict == model.predict_proba_one
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [metrics.Accuracy(), metrics.F1()],
+    ids=["accuracy", "f1"],
+)
+def test_sage_rejects_metric_that_needs_labels(metric):
+    with pytest.raises(ValueError, match="needs labels, but SAGE averages predictions"):
+        lm.importance.SAGE(classifier_pipeline(), metric)
+
+
+def test_sage_rejects_multi_output_labels_when_they_appear():
+    model = classifier_chain()
+    explainer = lm.importance.SAGE(model, metrics.multioutput.MicroAverage(metrics.Accuracy()))
+    stream = multi_output_stream(lambda v: v > 0.5, n=2)
+    with pytest.raises(TypeError, match="must be numbers or probabilities"):
+        run(explainer, model, stream)
+
+
+def test_sage_untrained_classifier_is_skipped():
+    model = tree.HoeffdingTreeClassifier()
+    explainer = lm.importance.SAGE(model, metrics.LogLoss(), seed=0)
+    explainer.learn_one({"a": 1.0}, True)
+    explainer.learn_one({"a": 2.0}, False)
+    assert explainer.importances == {}
+
+
+def test_sage_river_stats_as_trackers():
+    stream = list(datasets.synth.Friedman(seed=42).take(300))
+
+    def importances(tracker):
+        model = regressor_pipeline()
+        explainer = lm.importance.SAGE(
+            model,
+            metrics.MAE(),
+            imputer=lm.imputer.Marginal(lm.storage.UniformReservoir(seed=1), seed=2),
+            tracker=tracker,
+            seed=3,
+        )
+        return run(explainer, model, stream)
+
+    assert importances(stats.Mean()) == pytest.approx(importances(lm.tracker.Mean()))
+
+
+def test_sage_with_a_whole_multi_output_model():
+    model = regressor_chain()
+    explainer = lm.importance.SAGE(model, metrics.multioutput.MicroAverage(metrics.MAE()), seed=42)
+    importances = run(explainer, model, multi_output_stream(lambda v: 3 * v))
+
+    assert min(importances["a"], importances["b"]) > 0.25
+    assert abs(importances["c"]) < 0.05
+
+
+def test_per_output_with_sage():
+    model = regressor_chain()
+    explainer = lm.multioutput.PerOutput(
+        model, lambda output: lm.importance.SAGE(output, metrics.MAE(), seed=42)
+    )
+    for x, y in multi_output_stream(lambda v: 3 * v):
+        explainer.learn_one(x, y)
+        model.learn_one(x, y)
+    importances = explainer.importances
+
+    assert max(importances["y1"], key=importances["y1"].get) == "a"
+    assert max(importances["y2"], key=importances["y2"].get) == "b"
+    assert abs(importances["y1"]["c"]) < 0.05
+
+
+def test_per_output_with_sage_rejects_labels():
+    explainer = lm.multioutput.PerOutput(
+        classifier_chain(), lambda output: lm.importance.SAGE(output, metrics.Accuracy())
+    )
+    with pytest.raises(ValueError, match="needs labels"):
+        explainer.learn_one({"a": 1.0}, {"y1": True})
+
+
+def test_sage_groups_on_a_river_pipeline():
+    # In Friedman's stream, features 0 to 4 build the target, and 5 to 9 are noise. With few
+    # samples, the noise group would be pushed below zero
+    model = regressor_pipeline()
+    groups = {"used": [0, 1, 2, 3, 4], "noise": [5, 6, 7, 8, 9]}
+    explainer = lm.importance.SAGE(model, metrics.MAE(), groups=groups, n_samples=50, seed=42)
+    importances = run(explainer, model, datasets.synth.Friedman(seed=42).take(3000))
+
+    assert set(importances) == {"used", "noise"}
+    assert importances["used"] > 1
+    assert abs(importances["noise"]) < 0.1
+
+
+def test_sage_follows_a_drift():
+    # The target moves from depending on `a` to depending on `b`
+    def stream():
+        rng = random.Random(0)
+        for i in range(12000):
+            x = {"a": rng.random(), "b": rng.random()}
+            yield x, 3 * x["a"] if i < 6000 else 3 * x["b"]
+
+    model = linear_model.LinearRegression()
+    explainer = lm.importance.SAGE(
+        model,
+        metrics.MAE(),
+        imputer=lm.imputer.Marginal(lm.storage.GeometricReservoir(seed=0), seed=0),
+        tracker=lm.tracker.EWMean(alpha=0.01),
+        seed=0,
+    )
+    before = None
+    for i, (x, y) in enumerate(stream()):
+        explainer.learn_one(x, y)
+        model.learn_one(x, y)
+        if i == 5999:
+            before = explainer.importances
+    after = explainer.importances
+
+    assert before["a"] > before["b"] + 0.2
+    assert after["b"] > after["a"] + 0.2
+
+
 def test_pfi_follows_a_drift():
     # The target moves from depending on `a` to depending on `b`
     def stream():

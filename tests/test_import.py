@@ -59,6 +59,11 @@ explainer = lm.multioutput.PerOutput(
 explainer.learn_one({"a": 0.0}, {"y": 0.0})
 explainer.learn_one({"a": 1.0}, {"y": 2.0})
 assert explainer.importances["y"]["a"] == 2.0
+
+explainer = lm.importance.SAGE(Fixed(), AbsoluteError(), seed=0)
+explainer.learn_one({"a": 0.0}, 0.0)
+explainer.learn_one({"a": 1.0}, 2.0)
+assert explainer.importances["a"] == 0.0
 """
     subprocess.run([sys.executable, "-c", code], check=True)
 

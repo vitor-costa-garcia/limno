@@ -24,6 +24,9 @@ River, so an adapter can add them later.
 - **Incremental permutation feature importance** (`lm.importance.PFI`), from
   [Fumagalli et al. (2023)](https://doi.org/10.1007/s10994-023-06385-y). It shows how much a model
   relies on each feature, as the stream goes on.
+- **Incremental SAGE** (`lm.importance.SAGE`), from
+  [Muschalik et al. (2023)](https://doi.org/10.1007/978-3-031-43418-1_26). Its values add up to the
+  drop in loss between predicting the mean and using the model.
 - **Groups of features** (`groups=`), to measure features that only make sense together as one.
 - **Models with many outputs** (`lm.multioutput.PerOutput`), to see which features each output
   relies on.
@@ -77,7 +80,8 @@ it does not rely on it. The explainer never updates the model.
 
 The [notebooks](https://github.com/vitor-costa-garcia/limno/tree/main/notebooks) show limno in use
 with River. [How incremental PFI works](https://github.com/vitor-costa-garcia/limno/blob/main/notebooks/01_how_pfi_works.ipynb)
-explains the method step by step.
+and [How incremental SAGE works](https://github.com/vitor-costa-garcia/limno/blob/main/notebooks/02_how_sage_works.ipynb)
+explain the methods step by step.
 
 ## Contributing and feedback
 
