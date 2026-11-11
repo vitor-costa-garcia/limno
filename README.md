@@ -44,13 +44,12 @@ River, so an adapter can add them later.
 
 ## Installation
 
-limno is not on PyPI yet. To install it from a clone:
-
 ```bash
-pip install -e ".[river]"
+pip install "limno[river]"
 ```
 
-The `river` extra installs River. limno itself has no required dependencies.
+The `river` extra installs River. limno itself has no required dependencies, so
+`pip install limno` is enough for models and metrics from elsewhere.
 
 ## Quickstart
 

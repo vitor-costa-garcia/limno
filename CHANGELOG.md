@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+
+
+## v0.1.0 (2026-11-11)
+
 ### Feature
 
 * Add `lm.base` with the `Model`, `Metric` and `Tracker` protocols, and the `Explainer`, `ImportanceExplainer`, `Storage` and `Imputer` base classes
