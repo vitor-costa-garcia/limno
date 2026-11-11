@@ -135,7 +135,7 @@ class Imputer(abc.ABC):
         """
 
 
-def _check_groups(groups: dict) -> None:
+def _check_groups(groups: collections.abc.Mapping) -> None:
     """Check that every group has features, and that no feature is in two groups."""
     seen = set()
     for name, features in groups.items():
@@ -147,7 +147,7 @@ def _check_groups(groups: dict) -> None:
             seen.add(feature)
 
 
-def _group(x: dict, groups: dict) -> dict[Hashable, list[Feature]]:
+def _group(x: dict, groups: collections.abc.Mapping) -> dict[Hashable, list[Feature]]:
     """The features of `x` by group. A feature that is in no group is a group of its own."""
     group_of = {feature: name for name, features in groups.items() for feature in features}
     grouped: dict[Hashable, list[Feature]] = {}

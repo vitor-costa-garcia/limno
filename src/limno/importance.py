@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import copy
 import random
 import typing
@@ -75,7 +76,8 @@ class PFI(ImportanceExplainer):
         whole and gets one importance, under its name. With `imputer.Marginal`, its values all come
         from the same past instance. Features in no group get their own importance. This suits
         features that only make sense together, such as the columns of a one-hot encoding, or that
-        are correlated, as each one alone can be recovered from the others.
+        are correlated. A model can split its weight between correlated features, and then each one
+        alone looks less important than they are together.
 
     Examples
     --------
@@ -104,7 +106,8 @@ class PFI(ImportanceExplainer):
         n_samples: int = 1,
         seed: int | None = None,
         max_age: int | None = 2000,
-        groups: dict[typing.Hashable, list[Feature]] | None = None,
+        groups: collections.abc.Mapping[typing.Hashable, collections.abc.Collection[Feature]]
+        | None = None,
     ) -> None:
         super().__init__(model)
         self._predict = _predictor(model, metric)
@@ -154,7 +157,8 @@ class PFI(ImportanceExplainer):
                 for name, features in grouped.items():
                     imputed_loss = 0.0
                     for _ in range(self.n_samples):
-                        imputed = self.imputer.impute_one(x, features)
+                        # All the features of a group, so that those missing from `x` are filled in
+                        imputed = self.imputer.impute_one(x, self.groups.get(name, features))
                         imputed_loss += self._loss(y, self._predict(imputed))
                     if name not in self._trackers:
                         self._trackers[name] = copy.deepcopy(self.tracker)

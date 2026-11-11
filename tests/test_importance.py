@@ -318,7 +318,7 @@ def test_group_with_some_of_its_features():
     )
     explainer.learn_one({"a": 1.0, "c": 1.0}, 2.0)
     explainer.learn_one({"a": 1.0, "c": 1.0}, 2.0)
-    assert imputer.calls == (["a"], ["c"])
+    assert imputer.calls == (["a", "b"], ["c"])
     assert set(explainer.importances) == {"ab", "c"}
 
 
@@ -347,3 +347,19 @@ def test_group_named_like_a_feature_in_no_group():
     explainer = lm.importance.PFI(Fixed(), AbsoluteError(), groups={"b": ["a"]})
     with pytest.raises(ValueError, match="'b' is both a feature and the name of a group"):
         explainer.learn_one({"a": 1.0, "b": 1.0}, 2.0)
+
+
+def test_sparse_group_is_replaced_as_a_whole():
+    # As with one-hot encoding, an instance only has the active column of the group
+    class Recording:
+        seen = ()
+
+        def predict_one(self, x):
+            self.seen = (*self.seen, dict(x))
+            return 0.0
+
+    model = Recording()
+    explainer = lm.importance.PFI(model, AbsoluteError(), groups={"color": ["red", "blue"]}, seed=0)
+    explainer.learn_one({"blue": 1.0}, 0.0)
+    explainer.learn_one({"red": 1.0}, 0.0)
+    assert model.seen == ({"red": 1.0}, {"blue": 1.0})
