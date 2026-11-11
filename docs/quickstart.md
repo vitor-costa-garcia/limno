@@ -79,8 +79,8 @@ explainer = lm.importance.PFI(
 ```
 
 Features in no group get their own importance. Use groups for features that only make sense
-together, such as the columns of a one-hot encoding. Also use them for correlated features: replacing
-one of them alone can underrate it, as the model can recover it from the others. Each instance then
+together, such as the columns of a one-hot encoding. Also use them for correlated features: a model can split
+its weight between them, so each one alone looks less important than they are together. Each instance then
 takes `1 + n_groups * n_samples` predictions.
 
 ## Models with many outputs
