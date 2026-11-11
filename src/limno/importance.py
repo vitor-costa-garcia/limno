@@ -6,7 +6,17 @@ import copy
 import random
 import typing
 
-from limno.base import Feature, ImportanceExplainer, Imputer, Metric, Model, Tracker, _predictor
+from limno.base import (
+    Feature,
+    ImportanceExplainer,
+    Imputer,
+    Metric,
+    Model,
+    Tracker,
+    _check_groups,
+    _group,
+    _predictor,
+)
 from limno.imputer import Marginal
 from limno.storage import GeometricReservoir
 from limno.tracker import EWMean
@@ -24,7 +34,8 @@ class PFI(ImportanceExplainer):
     over the stream. A positive value means that the model does better with the feature, and a
     value close to zero that it does not rely on it.
 
-    Each instance takes `1 + n_features * n_samples` predictions.
+    Each instance takes `1 + n_features * n_samples` predictions, or `1 + n_groups * n_samples` with
+    `groups`.
 
     The method is from Fumagalli et al., "Incremental permutation feature importance (iPFI):
     towards online explanations on data streams", Machine Learning, 2023,
@@ -57,8 +68,14 @@ class PFI(ImportanceExplainer):
         Hide a feature from `importances` once it is missing from this many instances in a row, as
         its value is out of date. It comes back with its old value if it appears again. Raise this
         for features that are rare, and use `None` to never hide a feature. The default matches the
-        window of the default tracker. This is not part of iPFI, which assumes that the features
-        do not change.
+        window of the default tracker. A group is seen when any of its features is. This is not
+        part of iPFI, which assumes that the features do not change.
+    groups
+        Features to treat as one, such as `{"location": ["lat", "lon"]}`. A group is replaced as a
+        whole and gets one importance, under its name. With `imputer.Marginal`, its values all come
+        from the same past instance. Features in no group get their own importance. This suits
+        features that only make sense together, such as the columns of a one-hot encoding, or that
+        are correlated, as each one alone can be recovered from the others.
 
     Examples
     --------
@@ -87,6 +104,7 @@ class PFI(ImportanceExplainer):
         n_samples: int = 1,
         seed: int | None = None,
         max_age: int | None = 2000,
+        groups: dict[typing.Hashable, list[Feature]] | None = None,
     ) -> None:
         super().__init__(model)
         self._predict = _predictor(model, metric)
@@ -96,12 +114,15 @@ class PFI(ImportanceExplainer):
             raise ValueError("seed only applies to the default imputer, give it to your imputer")
         if max_age is not None and max_age < 1:
             raise ValueError(f"max_age must be at least 1 or None, got {max_age}")
+        groups = {} if groups is None else groups
+        _check_groups(groups)
 
         # A clone, as the loss of an instance must not be mixed with what the metric has seen
         self.metric = metric.clone()
         self.n_samples = n_samples
         self.seed = seed
         self.max_age = max_age
+        self.groups = groups
         if imputer is None:
             rng = random.Random(seed)
             storage = GeometricReservoir(seed=rng.getrandbits(32))
@@ -120,28 +141,29 @@ class PFI(ImportanceExplainer):
         return self._sign * loss
 
     def learn_one(self, x: dict, y: typing.Any) -> None:
+        grouped = _group(x, self.groups)
         self._n_seen += 1
-        for feature in x:
-            self._last_seen[feature] = self._n_seen
+        for name in grouped:
+            self._last_seen[name] = self._n_seen
 
         if self.imputer.ready:
             y_pred = self._predict(x)
             # A River classifier that has not learned yet predicts None or {}
             if y_pred is not None and y_pred != {}:
                 loss = self._loss(y, y_pred)
-                for feature in x:
+                for name, features in grouped.items():
                     imputed_loss = 0.0
                     for _ in range(self.n_samples):
-                        imputed = self.imputer.impute_one(x, [feature])
+                        imputed = self.imputer.impute_one(x, features)
                         imputed_loss += self._loss(y, self._predict(imputed))
-                    if feature not in self._trackers:
-                        self._trackers[feature] = copy.deepcopy(self.tracker)
-                    self._trackers[feature].update(imputed_loss / self.n_samples - loss)
+                    if name not in self._trackers:
+                        self._trackers[name] = copy.deepcopy(self.tracker)
+                    self._trackers[name].update(imputed_loss / self.n_samples - loss)
         self.imputer.learn_one(x)
 
     @property
     def importances(self) -> dict[Feature, float]:
-        """The current importance of each feature, without those hidden by `max_age`."""
+        """The current importance of each feature or group, without those hidden by `max_age`."""
         return {
             feature: tracker.get()
             for feature, tracker in self._trackers.items()

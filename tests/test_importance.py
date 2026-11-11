@@ -254,3 +254,96 @@ def test_metric_that_needs_probabilities_needs_predict_proba_one():
 
     with pytest.raises(TypeError, match="Probabilities needs probabilities.*Fixed"):
         lm.importance.PFI(Fixed(), Probabilities())
+
+
+def test_group_of_one_feature_matches_the_feature():
+    plain, grouped = static_pfi(), static_pfi(groups={"only_a": ["a"]})
+    for x, y in make_stream(2000):
+        plain.learn_one(x, y)
+        grouped.learn_one(x, y)
+    assert grouped.importances == {"only_a": plain.importances["a"], "b": plain.importances["b"]}
+
+
+def test_group_is_replaced_from_one_past_instance():
+    # `a` and `b` are always equal, so the model is exact as long as they come from one instance
+    class Difference:
+        def predict_one(self, x):
+            return x["a"] - x["b"]
+
+    def run(groups):
+        explainer = lm.importance.PFI(
+            Difference(), AbsoluteError(), tracker=lm.tracker.Mean(), groups=groups, seed=0
+        )
+        rng = random.Random(0)
+        for _ in range(5000):
+            value = rng.random()
+            explainer.learn_one({"a": value, "b": value}, 0.0)
+        return explainer.importances
+
+    alone = run(None)
+    assert alone["a"] == pytest.approx(1 / 3, abs=0.02)
+    assert alone["b"] == pytest.approx(1 / 3, abs=0.02)
+    assert run({"ab": ["a", "b"]}) == {"ab": 0.0}
+
+
+def test_group_number_of_predictions():
+    class Counting(Fixed):
+        n = 0
+
+        def predict_one(self, x):
+            self.n += 1
+            return super().predict_one(x)
+
+    model = Counting()
+    explainer = lm.importance.PFI(
+        model, AbsoluteError(), n_samples=3, groups={"ab": ["a", "b"]}, seed=0
+    )
+    x = {"a": 1.0, "b": 1.0, "c": 1.0}
+    explainer.learn_one(x, 2.0)
+    explainer.learn_one(x, 2.0)
+    assert model.n == 1 + 2 * 3
+
+
+def test_group_with_some_of_its_features():
+    class Recording(lm.imputer.Marginal):
+        calls = ()
+
+        def impute_one(self, x, features):
+            self.calls = (*self.calls, list(features))
+            return super().impute_one(x, features)
+
+    imputer = Recording(seed=0)
+    explainer = lm.importance.PFI(
+        Fixed(), AbsoluteError(), imputer=imputer, groups={"ab": ["a", "b"]}
+    )
+    explainer.learn_one({"a": 1.0, "c": 1.0}, 2.0)
+    explainer.learn_one({"a": 1.0, "c": 1.0}, 2.0)
+    assert imputer.calls == (["a"], ["c"])
+    assert set(explainer.importances) == {"ab", "c"}
+
+
+def test_group_is_seen_when_any_of_its_features_is():
+    explainer = lm.importance.PFI(
+        Fixed(), AbsoluteError(), max_age=2, groups={"ab": ["a", "b"]}, seed=0
+    )
+    for x in [{"a": 1.0, "b": 1.0}, {"a": 1.0}, {"b": 1.0}, {"b": 1.0}]:
+        explainer.learn_one(x, 2.0)
+    assert set(explainer.importances) == {"ab"}
+
+
+@pytest.mark.parametrize(
+    "groups, message",
+    [
+        ({"x": ["a"], "y": ["a", "b"]}, "feature 'a' is in more than one group"),
+        ({"x": []}, "group 'x' has no features"),
+    ],
+)
+def test_bad_groups(groups, message):
+    with pytest.raises(ValueError, match=message):
+        lm.importance.PFI(Fixed(), AbsoluteError(), groups=groups)
+
+
+def test_group_named_like_a_feature_in_no_group():
+    explainer = lm.importance.PFI(Fixed(), AbsoluteError(), groups={"b": ["a"]})
+    with pytest.raises(ValueError, match="'b' is both a feature and the name of a group"):
+        explainer.learn_one({"a": 1.0, "b": 1.0}, 2.0)

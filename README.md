@@ -24,6 +24,7 @@ River, so an adapter can add them later.
 - **Incremental permutation feature importance** (`lm.importance.PFI`), from
   [Fumagalli et al. (2023)](https://doi.org/10.1007/s10994-023-06385-y). It shows how much a model
   relies on each feature, as the stream goes on.
+- **Groups of features** (`groups=`), to measure features that only make sense together as one.
 - **Models with many outputs** (`lm.multioutput.PerOutput`), to see which features each output
   relies on.
 - **River metrics as the loss.** Whether the model is asked for labels or probabilities depends on
