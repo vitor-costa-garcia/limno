@@ -11,6 +11,7 @@ authors:
     email: vitorcostagarcia2006@gmail.com
     orcid: "https://orcid.org/0009-0009-0772-8356"
 version: 0.1.0
+doi: 10.5281/zenodo.24148517
 date-released: 2026-11-11
 license: BSD-3-Clause
 repository-code: "https://github.com/vitor-costa-garcia/limno"

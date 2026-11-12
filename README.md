@@ -1,6 +1,7 @@
 # limno
 
 [![CI](https://github.com/vitor-costa-garcia/limno/actions/workflows/ci.yml/badge.svg)](https://github.com/vitor-costa-garcia/limno/actions/workflows/ci.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24148517.svg)](https://doi.org/10.5281/zenodo.24148517)
 
 **Explainable AI for data streams and continual learning.**
 
